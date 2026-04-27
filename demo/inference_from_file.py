@@ -1,11 +1,14 @@
 import argparse
 import os
+os.system("pip install ipdb")
+os.system("pip install accelerate")
 import re
 import traceback
 from typing import List, Tuple, Union, Dict, Any
 import time
 import torch
-
+import sys
+sys.path.append("/gpfs01/nfs_share/data20250106/yuqiangz/master_models/VibeVoice_other")
 from vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForConditionalGenerationInference
 from vibevoice.modular.lora_loading import load_lora_assets
 from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
@@ -13,8 +16,6 @@ from transformers.utils import logging
 
 logging.set_verbosity_info()
 logger = logging.get_logger(__name__)
-
-
 class VoiceMapper:
     """Maps speaker names to voice file paths"""
     
@@ -149,7 +150,7 @@ def parse_args():
     parser.add_argument(
         "--txt_path",
         type=str,
-        default="demo/text_examples/1p_abs.txt",
+        default="text_examples/1p_abs.txt",
         help="Path to the txt file containing the script",
     )
     parser.add_argument(
@@ -331,7 +332,9 @@ def main():
         else:
             raise e
 
-
+    print("model :")
+    print(model)
+    assert 1 == 2
     if args.checkpoint_path:
         print(f"Loading fine-tuned assets from {args.checkpoint_path}")
         try:
@@ -369,13 +372,13 @@ def main():
        
     # Prepare inputs for the model
     inputs = processor(
-        text=[full_script], # Wrap in list for batch processing
-        voice_samples=[voice_samples], # Wrap in list for batch processing
+        text=[full_script], # Wrap in list for batch processing "'Speaker 1: Generating long-form, multi-speaker conversational audio like podcasts poses significant challenges for traditional Text-to-Speech (TTS) systems, particularly in scalability, speaker consistency, and natural turn-taking. This report presents VibeVoice, a novel model designed to synthesize long-form speech with multiple speakers by employing the next-token diffusion framework, a unified method for modeling continuous data by autoregressively generating latent vectors via diffusion.\nSpeaker 1: A core component of our approach is the continuous speech tokenizers operating at an ultra-low frame rate of 7.5. This tokenizer effectively preserves audio fidelity while significantly boosting computational efficiency for processing long sequences. This enables VibeVoice to synthesize long-form speech for up to 90 minutes (in a 64K context window length) with up to 4 speakers, capturing the authentic conversational "vibe" and surpassing all known open-source and closed-source dialogue models (for example, Gemini 2.5 Pro Preview TTS). Code and checkpoint are available now.'"
+        voice_samples=[voice_samples], # Wrap in list for batch processing. # /gpfs01/nfs_share/data20250106/yuqiangz/master_models/VibeVoice_other/demo/voices/en-Alice_woman.wav
         padding=True,
         return_tensors="pt",
         return_attention_mask=True,
-    )
-
+    ) # dict_keys(['input_ids', 'attention_mask', 'speech_input_mask', 'speech_tensors', 'speech_masks', 'parsed_scripts', 'all_speakers_list'])
+    # torch.Size([1, 319])  torch.Size([1, 319]) torch.Size([1, 319]) torch.Size([1, 222480]) torch.Size([1, 70]) len(inputs["parsed_scripts"])=1 len(inputs["parsed_scripts"][0]) inputs["parsed_scripts"][0][0] (spk1,text1)inputs["parsed_scripts"][0][1] (spk1,text2) inputs["all_speakers_list"] [[0]]
     # Move tensors to target device
     target_device = args.device if args.device != "cpu" else "cpu"
     for k, v in inputs.items():
@@ -386,6 +389,7 @@ def main():
 
     # Generate audio
     start_time = time.time()
+    import ipdb; ipdb.set_trace()
     outputs = model.generate(
         **inputs,
         max_new_tokens=None,
