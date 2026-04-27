@@ -430,6 +430,8 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
             progress_bar = range(max_steps)
         
         for step in progress_bar:
+            import ipdb
+            ipdb.set_trace()
             # Check for external stop signal
             if stop_check_fn is not None and stop_check_fn():
                 if verbose:
@@ -451,7 +453,7 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
                     progress_bar.set_description("Generation complete")
                 break
 
-            if input_ids.shape[-1] >= generation_config.max_length:
+            if input_ids.shape[-1] >= generation_config.max_length: # generation_config.max_length 65536
                 print(f"Reached maximum generation length {generation_config.max_length}, stopped it.")
                 reached_samples = torch.arange(batch_size, device=device)[~finished_tags]
                 if reached_samples.numel() > 0:
@@ -462,16 +464,16 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
             if hasattr(progress_bar, 'set_description'):
                 active_samples = (~finished_tags).sum().item()
                 progress_bar.set_description(f"Generating (active: {active_samples}/{batch_size})")
-
-            model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+            # model_inputs keys dict_keys(['cache_position', 'past_key_values', 'input_ids', 'inputs_embeds', 'position_ids', 'attention_mask', 'speech_start_id', 'speech_end_id', 'speech_diffusion_id', 'verbose', 'use_cache'])  model_inputs["cache_position"] torch.Size([319]) 0-318  model_inputs["past_key_values"] len 28; model_inputs["input_ids"] torch.Size([1, 319])  model_inputs["inputs_embeds"] None model_inputs["position_ids"] torch.Size([1, 319]) 0-318  model_inputs["attention_mask"] torch.Size([1, 319]) all 1  model_inputs["speech_start_id"] 151652  model_inputs["speech_end_id"] 151653  model_inputs["speech_diffusion_id"] 151654 model_inputs["verbose"] True model_inputs["use_cache"] True
+            model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs) # input_ids torch.Size([1, 319])
             if is_prefill:
                 # we process the speech inputs only during the first generation step
                 prefill_inputs = {}
-                if speech_tensors is not None:
+                if speech_tensors is not None:  # torch.Size([1, 222480])
                     prefill_inputs["speech_tensors"] = speech_tensors.to(device=device)
-                if speech_masks is not None:
+                if speech_masks is not None:  # torch.Size([1, 70]) all True
                     prefill_inputs["speech_masks"] = speech_masks.to(device)
-                if speech_input_mask is not None:
+                if speech_input_mask is not None: # torch.Size([1, 319]) sum 70
                     prefill_inputs["speech_input_mask"] = speech_input_mask.to(device)
                 is_prefill = False
             else:
@@ -481,28 +483,28 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
             # Forward pass through the model
             outputs = self(
                 **model_inputs, **prefill_inputs, logits_to_keep=1, return_dict=True, output_attentions=False, output_hidden_states=False,
-            )
+            ) # odict_keys(['last_hidden_state', 'past_key_values', 'logits']) outputs.last_hidden_state torch.Size([1, 319, 1536]) outputs.past_key_values tuple of length 28, each is a tuple of 2 tensors, each tensor is torch.Size([1, 2, 319, 128]) outputs.logits torch.Size([1, 1, 151936])
             model_kwargs = self._update_model_kwargs_for_generation(
                 outputs, model_kwargs, is_encoder_decoder=False,
-            )
+            ) # ['speech_start_id',151652  'speech_end_id',151653  'speech_diffusion_id',151654  'attention_mask', torch.Size([1, 320]) all 1  'verbose', True 'use_cache', True 'past_key_values', len(model_kwargs["past_key_values"]) 28  'cache_position' tensor([319]] 
 
             # Get logits and apply logits processor
             next_token_logits = outputs.logits[:, -1, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
             # next_token_logits = outputs.logits[:, -1, :].to(copy=True, device=input_ids.device)
-            next_token_scores = logits_processor(input_ids, next_token_logits)
+            next_token_scores = logits_processor(input_ids, next_token_logits) # input_ids torch.Size([1, 319])  next_token_logits torch.Size([1, 151936]) -> next_token_scores [1, 151936] next_token_scores.max() 23.3750
             
             # token selection
             if generation_config.do_sample:
                 probs = nn.functional.softmax(next_token_scores, dim=-1)
                 # TODO (joao): this OP throws "skipping cudagraphs due to ['incompatible ops']", find solution
                 next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
-            else:
-                next_tokens = torch.argmax(next_token_scores, dim=-1)
-
-            next_tokens[finished_tags] = generation_config.eos_token_id
-            input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
+            else: # yes
+                next_tokens = torch.argmax(next_token_scores, dim=-1) # next_tokens torch.Size([1]) next_tokens.item() 151654
+            # finished_tags False
+            next_tokens[finished_tags] = generation_config.eos_token_id # generation_config.eos_token_id 151643 -> tensor([151654], device='cuda:0')
+            input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1) # input_ids torch.Size([1, 319]) [[151654]] -> input_ids [1,320]
             
-            if not kwargs.get('refresh_negative', True):
+            if not kwargs.get('refresh_negative', True): # not enter
                 negative_model_inputs = self.prepare_inputs_for_generation(negative_input_ids, **negative_model_kwargs)
                 # Forward negative pass through the model
                 if negative_model_inputs['inputs_embeds'] is None and inputs_embeds is not None:
@@ -518,7 +520,7 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
                 negative_input_ids = torch.cat([negative_input_ids, next_tokens[:, None]], dim=-1)
 
             # reached end of generation
-            if (next_tokens == generation_config.eos_token_id).any():
+            if (next_tokens == generation_config.eos_token_id).any():  # generation_config.eos_token_id 151643 not enter
                 eos_indices = (next_tokens == generation_config.eos_token_id).nonzero(as_tuple=False).squeeze(1)
                 # Only print for samples that are newly finished (not already marked as finished)
                 new_eos_indices = eos_indices[~finished_tags[eos_indices]]
@@ -530,9 +532,9 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
                         audio_streamer.end(new_eos_indices)
 
             # Check if any sample reached its maximum generation length
-            max_length_reached = step >= max_step_per_sample
-            new_max_length_indices = torch.nonzero(max_length_reached & ~finished_tags, as_tuple=False).squeeze(1)
-            if new_max_length_indices.numel() > 0:
+            max_length_reached = step >= max_step_per_sample # max_step_per_sample 638 step 0  max_length_reached False
+            new_max_length_indices = torch.nonzero(max_length_reached & ~finished_tags, as_tuple=False).squeeze(1) # new_max_length_indices tensor([], device='cuda:0', dtype=torch.int64) 
+            if new_max_length_indices.numel() > 0:  # new_max_length_indices.numel() 0
                 finished_tags[new_max_length_indices] = True
                 reach_max_step_sample[new_max_length_indices] = True
                 if verbose:
@@ -541,14 +543,14 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
                     audio_streamer.end(new_max_length_indices)
 
             # speech_end
-            diffusion_end_indices = (next_tokens == generation_config.speech_end_id).nonzero(as_tuple=False).squeeze(1)
-            if diffusion_end_indices.numel() > 0:
+            diffusion_end_indices = (next_tokens == generation_config.speech_end_id).nonzero(as_tuple=False).squeeze(1) # tensor([], device='cuda:0', dtype=torch.int64)
+            if diffusion_end_indices.numel() > 0: # diffusion_end_indices.numel() 0
                 # Clear tokenizer caches for samples that reached speech end
                 acoustic_cache.set_to_zero(diffusion_end_indices)
                 semantic_cache.set_to_zero(diffusion_end_indices)
             
             # speech_begin
-            diffusion_start_indices = torch.arange(batch_size, device=device)[~finished_tags & (next_tokens == generation_config.speech_start_id)]
+            diffusion_start_indices = torch.arange(batch_size, device=device)[~finished_tags & (next_tokens == generation_config.speech_start_id)] # next_tokens tensor([151654]) generation_config.speech_start_id  151652 finished_tags tensor([False]) diffusion_start_indices tensor([])
             if diffusion_start_indices.numel() > 0 and kwargs.get('refresh_negative', True):
                 # update attention mask
                 for i, sample_idx in enumerate(diffusion_start_indices.tolist()):
@@ -568,33 +570,33 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
             
             # Prepare inputs_embeds for next iteration
             # Initialize with default embeddings for all tokens
-            next_inputs_embeds = self.model.get_input_embeddings()(next_tokens).unsqueeze(1)  # [batch_size, 1, hidden_size]
+            next_inputs_embeds = self.model.get_input_embeddings()(next_tokens).unsqueeze(1)  # [batch_size, 1, hidden_size] # next_tokens tensor([151654]) -> Embedding(151936, 1536) -> next_inputs_embeds torch.Size([1, 1, 1536])
             
             # forward diffusion
             # Diffusion indices are those that are not finished and not special tokens
-            diffusion_indices = torch.arange(batch_size, device=device)[~finished_tags & (next_tokens == generation_config.speech_diffusion_id)]
-            
+            diffusion_indices = torch.arange(batch_size, device=device)[~finished_tags & (next_tokens == generation_config.speech_diffusion_id)] # next_tokens tensor([151654]) generation_config.speech_diffusion_id 151654 diffusion_indices tensor([0], device='cuda:0')
+            # diffusion_indices.numel() = 1
             if diffusion_indices.numel() > 0:
-                if kwargs.get('refresh_negative', True):
-                    negative_model_inputs = self.prepare_inputs_for_generation(negative_input_ids, **negative_model_kwargs)
+                if kwargs.get('refresh_negative', True):  # yes. negative_input_ids tensor([[151652]])
+                    negative_model_inputs = self.prepare_inputs_for_generation(negative_input_ids, **negative_model_kwargs) # {'cache_position': tensor([0], device='cuda:0'), 'past_key_values': <transformers.cache_utils.DynamicCache object at 0x7ff9f4cf4760>, 'input_ids': tensor([[151652]], device='cuda:0'), 'inputs_embeds': None, 'position_ids': tensor([[0]], device='cuda:0'), 'attention_mask': tensor([[1]], device='cuda:0'), 'speech_start_id': 151652, 'speech_end_id': 151653, 'speech_diffusion_id': 151654, 'use_cache': True}
                     # Forward negative pass through the model
-                    if negative_model_inputs['inputs_embeds'] is None and inputs_embeds is not None:
+                    if negative_model_inputs['inputs_embeds'] is None and inputs_embeds is not None:  # False
                         negative_model_inputs['inputs_embeds'] = inputs_embeds
                         negative_model_inputs['input_ids'] = None
 
                     negative_outputs = self(
                         **negative_model_inputs, logits_to_keep=0, return_dict=True, output_attentions=False, output_hidden_states=False,
-                    )
+                    ) # ['last_hidden_state', 'past_key_values', 'logits'] negative_outputs.last_hidden_state torch.Size([1, 1, 1536]) negative_outputs.past_key_values tuple of length 28, each is a tuple of 2 tensors, each tensor is torch.Size([1, 2, 1, 128]) negative_outputs.logits torch.Size([1, 1, 151936])
                     negative_model_kwargs = self._update_model_kwargs_for_generation(
                         negative_outputs, negative_model_kwargs, is_encoder_decoder=False,
                     )
-                    negative_input_ids = torch.cat([negative_input_ids, next_tokens[:, None]], dim=-1)
+                    negative_input_ids = torch.cat([negative_input_ids, next_tokens[:, None]], dim=-1) # torch.Size([1, 2])
                 # correct the non-diffusion indices
                 # we forward all samples' negative outputs even if 
                 #   they are not in diffusion mode to keep the cache consistent
                 # So we need to correct the kv cache of non-diffusion samples
-                non_diffusion_mask = ~finished_tags & (next_tokens != generation_config.speech_diffusion_id)
-                if non_diffusion_mask.any():
+                non_diffusion_mask = ~finished_tags & (next_tokens != generation_config.speech_diffusion_id) # next_tokens tensor([151654]) generation_config.speech_diffusion_id 151654 finished_tags tensor([False]) -> non_diffusion_mask tensor([False])
+                if non_diffusion_mask.any():   # False
                     non_diffusion_indices = torch.arange(batch_size, device=device)[non_diffusion_mask]
                     start_indices = correct_cnt[non_diffusion_indices]
 
@@ -625,34 +627,34 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
                                 
                     correct_cnt[non_diffusion_indices] += 1
 
-                positive_condition = outputs.last_hidden_state[diffusion_indices, -1, :]
-                negative_condition = negative_outputs.last_hidden_state[diffusion_indices, -1, :]
+                positive_condition = outputs.last_hidden_state[diffusion_indices, -1, :] # outputs.last_hidden_state torch.Size([1, 319, 1536]) diffusion_indices tensor([0], device='cuda:0') -> positive_condition torch.Size([1, 1536])
+                negative_condition = negative_outputs.last_hidden_state[diffusion_indices, -1, :] # negative_outputs.last_hidden_state torch.Size([1, 1, 1536]) diffusion_indices tensor([0], device='cuda:0') -> negative_condition torch.Size([1, 1536])
                 
                 speech_latent = self.sample_speech_tokens(
-                    positive_condition,
-                    negative_condition,
-                    cfg_scale=cfg_scale,
-                ).unsqueeze(1)
+                    positive_condition, # torch.Size([1, 1536])
+                    negative_condition, # torch.Size([1, 1536])
+                    cfg_scale=cfg_scale, # cfg_scale 1.3
+                ).unsqueeze(1) # speech_latent torch.Size([1, 1, 64])
                                 
-                # Decode acoustic latent to audio using acoustic streaming cache
-                scaled_latent = speech_latent / self.model.speech_scaling_factor.to(speech_latent.device) - self.model.speech_bias_factor.to(speech_latent.device)
+                # Decode acoustic latent to audio using acoustic streaming cache # self.model.speech_scaling_factor 0.1963  self.model.speech_bias_factor -0.0493
+                scaled_latent = speech_latent / self.model.speech_scaling_factor.to(speech_latent.device) - self.model.speech_bias_factor.to(speech_latent.device) # scaled_latent torch.Size([1, 1, 64])
                 audio_chunk = self.model.acoustic_tokenizer.decode(
                     scaled_latent.to(self.model.acoustic_tokenizer.device),
                     cache=acoustic_cache,  # Use acoustic-specific cache
                     sample_indices=diffusion_indices.to(self.model.acoustic_tokenizer.device),
                     use_cache=True,
                     debug=False
-                )
-                
+                ) # audio_chunk [1, 1, 3200]
+                # diffusion_indices tensor([0], device='cuda:0')
                 # Store audio chunks for each sample
-                for i, sample_idx in enumerate(diffusion_indices):
+                for i, sample_idx in enumerate(diffusion_indices): # diffusion_indices tensor([0], device='cuda:0')
                     idx = sample_idx.item()
                     # Only append audio chunk if the sample is not finished
                     if not finished_tags[idx]:
-                        audio_chunks[idx].append(audio_chunk[i])
+                        audio_chunks[idx].append(audio_chunk[i]) # audio_chunk[i] torch.Size([1, 3200]) 
 
                  # Add streaming support here
-                if audio_streamer is not None:
+                if audio_streamer is not None: # audio_streamer is None
                     # Stream the audio chunks immediately
                     audio_streamer.put(audio_chunk, diffusion_indices)
                     
@@ -663,15 +665,15 @@ class VibeVoiceForConditionalGenerationInference(VibeVoicePreTrainedModel, Gener
                     sample_indices=diffusion_indices,
                     use_cache=True,
                     debug=False
-                ).mean # semantic tokenizer has no VAE.
+                ).mean # semantic tokenizer has no VAE. # semantic_features torch.Size([1, 1, 128]) 
                 
                 # Combine acoustic and semantic features for next input
-                acoustic_embed = self.model.acoustic_connector(speech_latent)
-                semantic_embed = self.model.semantic_connector(semantic_features)
-                diffusion_embeds = acoustic_embed + semantic_embed
+                acoustic_embed = self.model.acoustic_connector(speech_latent) # acoustic_embed torch.Size([1, 1, 1536])
+                semantic_embed = self.model.semantic_connector(semantic_features) # semantic_embed torch.Size([1, 1, 1536]) 1536])
+                diffusion_embeds = acoustic_embed + semantic_embed # diffusion_embeds torch.Size([1, 1, 1536])
 
-                # Update embeddings for diffusion indices
-                next_inputs_embeds[diffusion_indices] = diffusion_embeds
+                # Update embeddings for diffusion indices # source next_inputs_embeds torch.Size([1, 1, 1536])
+                next_inputs_embeds[diffusion_indices] = diffusion_embeds # diffusion_indices tensor([0], device='cuda:0') next_inputs_embeds torch.Size([1, 1, 1536]) diffusion_embeds torch.Size([1, 1, 1536])
             
             # Set inputs_embeds for next iteration
             inputs_embeds = next_inputs_embeds
