@@ -137,7 +137,7 @@ class EmaCallback(TrainerCallback):
 @dataclass
 class ModelArguments:
     model_name_or_path: Optional[str] = field(
-        default=None, metadata={"help": "Path to VibeVoice base model with config.json"}
+        default="vibevoice/VibeVoice-7B", metadata={"help": "Path to VibeVoice base model with config.json"}
     )
     processor_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "Path to processor dir (preprocessor_config.json). Defaults to model path."}
@@ -172,7 +172,7 @@ class DataArguments:
     eval_split_size: float = field(default=0.0)
     ignore_verifications: bool = field(default=False)
     max_length: Optional[int] = field(default=None)
-    train_jsonl: Optional[str] = field(default=None, metadata={"help": "Path to local train JSONL with {text, audio, [voice_prompts]}"})
+    train_jsonl: Optional[str] = field(default="/gpfs01/nfs_share/data20250106/yuqiangz/master_models/VibeVoice_other/train.jsonl", metadata={"help": "Path to local train JSONL with {text, audio, [voice_prompts]}"})
     validation_jsonl: Optional[str] = field(default=None, metadata={"help": "Optional path to local validation JSONL"})
     voice_prompt_drop_rate: float = field(
         default=0.0,

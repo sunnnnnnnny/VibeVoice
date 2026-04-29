@@ -175,3 +175,6 @@ tags
 /checkpoints/
 exp
 .gradio/
+tools
+vibevoice/finetune/unsloth_compiled_cache
+
